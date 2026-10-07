@@ -1,1 +1,680 @@
 
+# -*- coding: utf-8 -*-
+# HANDHELD NRF24 LONG-RANGE COMMUNICATOR - Fusion 360 enclosure generator (units: mm in this file, cm inside Fusion)
+import adsk.core, adsk.fusion, traceback, math, os
+
+SHOW_COMPONENTS = True   # True = detailed ESP32 / OLED / TP4056 / NRF24 / battery / switch models stay visible inside the enclosure
+SHOW_ANTENNA = True      # True = RP-SMA antenna (bent 90 deg upward) is modelled outside the top wall
+
+PARAMS = {
+ # ---- enclosure ----
+ 'enclosureLength':126.0,'enclosureWidth':80.0,'enclosureHeight':45.0,'wallThickness':2.4,'baseThickness':2.8,
+ 'frontPlateThickness':2.4,'splitHeight':27.0,'lipHeight':3.0,'shellGap':0.2,'cornerRadius':6.0,'edgeFillet':1.2,
+ 'pcbClearance':0.5,'wireClearance':5.0,'dupontClearance':15.0,
+ 'screwBossDiameter':7.0,'m3Pilot':2.6,'m3Clearance':3.4,'m3HeadDiameter':6.4,'m3HeadDepth':3.0,
+ 'm2Clearance':2.2,'m2Pilot':1.7,'postDiameter':4.6,
+ # ---- ports / openings ----
+ 'usbCutoutWidth':13.0,'usbCutoutHeight':7.0,'switchCutoutWidth':19.4,'switchCutoutHeight':13.1,
+ 'smaHoleDiameter':8.5,'smaSlotExtra':3.0,'buttonHoleDiameter':16.6,'grilleHoleDiameter':2.5,
+ # ---- OLED ----
+ 'oledWindowWidth':23.0,'oledWindowHeight':12.0,'oledPcbWidth':27.3,'oledPcbHeight':27.8,'oledHoleDX':23.5,'oledHoleDY':24.0,
+ 'oledActiveOffsetY':0.0,'oledCenterY':30.0,'oledPostHeight':2.8,'oledGlassWidth':26.7,'oledGlassHeight':19.26,'oledGlassThickness':1.9,
+ # ---- keypad ----
+ 'keycapDiameter':16.0,'keycapProtrusion':2.0,'keyFlangeThickness':1.2,'keyPitchX':25.0,'keyPitchY':23.0,'keyRow1Y':-2.0,
+ 'tactSize':6.0,'tactHeight':5.0,'keyPlay':0.2,'keypadBoardWidth':64.0,'keypadBoardHeight':44.0,'keypadBoardThickness':1.6,'keypadTailDepth':2.0,
+ # ---- component envelopes (verified / conservative) ----
+ 'esp32Length':54.5,'esp32Width':28.0,'esp32Height':12.5,'esp32Standoff':14.0,'esp32UsbCenterAbovePcb':1.6,'esp32CenterX':9.5,
+ 'nrfLength':41.0,'nrfWidth':15.5,'nrfHeight':14.0,'nrfStandoff':5.0,'nrfConnectorExt':7.0,'nrfConnectorDia':6.4,'smaAxisAbovePcb':3.0,'nrfCenterX':21.4,
+ 'tpLength':28.0,'tpWidth':17.5,'tpHeight':4.2,'tpStandoff':4.0,'tpUsbCenterAbovePcb':2.6,'tpCenterX':-20.9,
+ 'amsLength':25.5,'amsWidth':11.5,'amsHeight':4.0,'amsStandoff':3.0,
+ 'holderLength':76.0,'holderWidth':21.5,'holderHeight':20.0,'cellDiameter':18.4,'cellLength':67.0,
+ 'buzzerDiameter':12.0,'buzzerHeight':9.5,'buzzerY':-25.0,
+ 'switchBodyWidth':19.2,'switchBodyHeight':12.9,'switchDepth':20.0,'switchCenterX':-2.0,'switchCenterZ':14.0,
+}
+WARN = []
+def warn(m): WARN.append(m)
+def mm(v): return v/10.0
+def vi(v): return adsk.core.ValueInput.createByReal(mm(v))
+def pt(x, y, z=0.0): return adsk.core.Point3D.create(mm(x), mm(y), mm(z))
+NEW = adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+JOIN = adsk.fusion.FeatureOperations.JoinFeatureOperation
+CUT = adsk.fusion.FeatureOperations.CutFeatureOperation
+_planes = {}
+
+# ======================= geometry helpers =======================
+def plane_z(comp, z):
+    if abs(z) < 1e-9: return comp.xYConstructionPlane
+    key = (comp.name, round(z, 3))
+    if key not in _planes:
+        pin = comp.constructionPlanes.createInput()
+        pin.setByOffset(comp.xYConstructionPlane, vi(z))
+        pl = comp.constructionPlanes.add(pin); pl.name = 'PLANE_Z_%.2f' % z
+        _planes[key] = pl
+    return _planes[key]
+
+def sk_new(comp, z, name):
+    sk = comp.sketches.add(plane_z(comp, z)); sk.name = name; return sk
+
+def rrect(sk, cx, cy, w, h, r):
+    r = max(0.0, min(r, w/2.0-0.01, h/2.0-0.01))
+    x0, x1, y0, y1 = cx-w/2.0, cx+w/2.0, cy-h/2.0, cy+h/2.0
+    if r < 0.05:
+        sk.sketchCurves.sketchLines.addTwoPointRectangle(pt(x0, y0), pt(x1, y1)); return
+    L = sk.sketchCurves.sketchLines; A = sk.sketchCurves.sketchArcs; c = math.sqrt(0.5)*r
+    l1 = L.addByTwoPoints(pt(x0+r, y0), pt(x1-r, y0))
+    a1 = A.addByThreePoints(l1.endSketchPoint, pt(x1-r+c, y0+r-c), pt(x1, y0+r))
+    l2 = L.addByTwoPoints(a1.endSketchPoint, pt(x1, y1-r))
+    a2 = A.addByThreePoints(l2.endSketchPoint, pt(x1-r+c, y1-r+c), pt(x1-r, y1))
+    l3 = L.addByTwoPoints(a2.endSketchPoint, pt(x0+r, y1))
+    a3 = A.addByThreePoints(l3.endSketchPoint, pt(x0+r-c, y1-r+c), pt(x0, y1-r))
+    l4 = L.addByTwoPoints(a3.endSketchPoint, pt(x0, y0+r))
+    A.addByThreePoints(l4.endSketchPoint, pt(x0+r-c, y0+r-c), l1.startSketchPoint)
+
+def circ(sk, x, y, d): sk.sketchCurves.sketchCircles.addByCenterRadius(pt(x, y), mm(d/2.0))
+def rect(sk, x0, y0, x1, y1): sk.sketchCurves.sketchLines.addTwoPointRectangle(pt(x0, y0), pt(x1, y1))
+
+def allprofs(sk, profiles=None):
+    col = adsk.core.ObjectCollection.create()
+    for p in (profiles if profiles is not None else [sk.profiles.item(i) for i in range(sk.profiles.count)]): col.add(p)
+    return col
+
+def ext(comp, sk, dist, op, name, profiles=None):
+    inp = comp.features.extrudeFeatures.createInput(allprofs(sk, profiles), op)
+    inp.setDistanceExtent(False, vi(dist))
+    f = comp.features.extrudeFeatures.add(inp); f.name = name; return f
+
+def ext_sym(comp, sk, total, op, name, profiles=None):
+    inp = comp.features.extrudeFeatures.createInput(allprofs(sk, profiles), op)
+    inp.setSymmetricExtent(vi(total), True)
+    f = comp.features.extrudeFeatures.add(inp); f.name = name; return f
+
+def new_comp(parent, name):
+    occ = parent.occurrences.addNewComponent(adsk.core.Matrix3D.create()); occ.component.name = name; return occ, occ.component
+
+def fillet_face(comp, body, top, r, label):
+    try:
+        best = None; bz = None
+        for f in body.faces:
+            if f.geometry.surfaceType != adsk.core.SurfaceTypes.PlaneSurfaceType: continue
+            ok, n = f.evaluator.getNormalAtPoint(f.pointOnFace)
+            if abs(n.z) < 0.99 or (n.z > 0) != top: continue
+            z = f.pointOnFace.z
+            if bz is None or (top and z > bz) or ((not top) and z < bz): best, bz = f, z
+        edges = adsk.core.ObjectCollection.create()
+        for lp in best.loops:
+            if lp.isOuter:
+                for e in lp.edges: edges.add(e)
+        fi = comp.features.filletFeatures.createInput(); fi.addConstantRadiusEdgeSet(edges, vi(r), True)
+        comp.features.filletFeatures.add(fi).name = label
+    except: warn('Fillet skipped (%s)' % label)
+
+def vsketch(comp, axis, coord, name):
+    """sketch on a vertical plane through x=coord (axis 'X') or y=coord (axis 'Y'); sign verified at run time"""
+    base = comp.yZConstructionPlane if axis == 'X' else comp.xZConstructionPlane
+    for sign in (1, -1):
+        pin = comp.constructionPlanes.createInput(); pin.setByOffset(base, vi(sign*coord))
+        pl = comp.constructionPlanes.add(pin); sk = comp.sketches.add(pl)
+        try:
+            o = sk.sketchToModelSpace(adsk.core.Point3D.create(0, 0, 0)); v = o.x if axis == 'X' else o.y
+            good = abs(v - mm(coord)) < 1e-6
+        except: good = True
+        if good: sk.name = name; return sk
+        sk.deleteMe(); pl.deleteMe()
+    raise RuntimeError('vertical plane failed ' + name)
+
+def msp(sk, x, y, z):
+    p = sk.modelToSketchSpace(pt(x, y, z)); return adsk.core.Point3D.create(p.x, p.y, 0)
+
+def wall_cut(comp, axis, coord, shapes, name, total):
+    """shapes: ('rect',a0,b0,a1,b1) / ('circ',a,b,d). (a,b)=(Y,Z) for axis X, (X,Z) for axis Y"""
+    sk = vsketch(comp, axis, coord, 'SK_' + name)
+    def M(a, b): return msp(sk, coord, a, b) if axis == 'X' else msp(sk, a, coord, b)
+    for s in shapes:
+        if s[0] == 'rect': sk.sketchCurves.sketchLines.addTwoPointRectangle(M(s[1], s[2]), M(s[3], s[4]))
+        else: sk.sketchCurves.sketchCircles.addByCenterRadius(M(s[1], s[2]), mm(s[3]/2.0))
+    ext_sym(comp, sk, total, CUT, 'CUT_' + name)
+
+def text_profiles(sk):
+    ps = [sk.profiles.item(i) for i in range(sk.profiles.count)]; out = []
+    for p in ps:
+        inner = False
+        if p.profileLoops.count == 1:
+            b = p.boundingBox
+            for q in ps:
+                if q is p or q.profileLoops.count < 2: continue
+                c = q.boundingBox
+                if c.minPoint.x <= b.minPoint.x and c.minPoint.y <= b.minPoint.y and c.maxPoint.x >= b.maxPoint.x and c.maxPoint.y >= b.maxPoint.y: inner = True
+        if not inner: out.append(p)
+    return out
+
+def add_text(sk, txt, h, cx, cy, w):
+    ti = sk.sketchTexts.createInput2(txt, mm(h))
+    ti.setAsMultiLine(pt(cx-w/2.0, cy-h), pt(cx+w/2.0, cy+h), adsk.core.HorizontalAlignments.CenterHorizontalAlignment, adsk.core.VerticalAlignments.MiddleVerticalAlignment, 0)
+    sk.sketchTexts.add(ti)
+
+def box_body(comp, x0, y0, z0, x1, y1, z1, name):
+    sk = sk_new(comp, z0, 'SK_' + name); rect(sk, x0, y0, x1, y1)
+    f = ext(comp, sk, z1-z0, NEW, 'EXT_' + name); f.bodies.item(0).name = name; return f.bodies.item(0)
+
+def ring_rects(x0, x1, y0, y1, c, t, seg, sides):
+    """corner-guide strips around a footprint; sides subset of 'LRBT'; seg = segment length from each end"""
+    R = []
+    if 'L' in sides: R += [(x0-c-t, y0, x0-c, y0+seg), (x0-c-t, y1-seg, x0-c, y1)]
+    if 'R' in sides: R += [(x1+c, y0, x1+c+t, y0+seg), (x1+c, y1-seg, x1+c+t, y1)]
+    if 'B' in sides: R += [(x0, y0-c-t, x0+seg, y0-c), (x1-seg, y0-c-t, x1, y0-c)]
+    if 'T' in sides: R += [(x0, y1+c, x0+seg, y1+c+t), (x1-seg, y1+c, x1, y1+c+t)]
+    return R
+
+# ======================= layout (single source of truth) =======================
+def layout(P):
+    hx = P['enclosureWidth']/2.0-P['wallThickness']; hy = P['enclosureLength']/2.0-P['wallThickness']
+    base = P['baseThickness']; Zi = P['enclosureHeight']-P['frontPlateThickness']; C = {}
+    def bx(n, cx, cy, w, l, z0, h): C[n] = dict(x0=cx-w/2.0, x1=cx+w/2.0, y0=cy-l/2.0, y1=cy+l/2.0, z0=z0, z1=z0+h)
+    bx('TP4056', P['tpCenterX'], -hy+0.6+P['tpLength']/2.0, P['tpWidth'], P['tpLength'], base+P['tpStandoff'], P['tpHeight'])
+    hy0 = C['TP4056']['y1']+3.0
+    C['BATTERY_HOLDER'] = dict(x0=-hx+0.6, x1=-hx+0.6+P['holderWidth'], y0=hy0, y1=hy0+P['holderLength'], z0=base, z1=base+P['holderHeight'])
+    bx('NRF24', P['nrfCenterX'], hy-0.6-P['nrfLength']/2.0, P['nrfWidth'], P['nrfLength'], base+P['nrfStandoff'], P['nrfHeight'])
+    sx = P['switchCenterX']; sw = P['switchBodyWidth']; sz = P['switchCenterZ']; sh = P['switchBodyHeight']
+    C['SWITCH'] = dict(x0=sx-sw/2.0, x1=sx+sw/2.0, y0=hy-P['switchDepth'], y1=hy, z0=sz-sh/2.0, z1=sz+sh/2.0)
+    C['AMS1117'] = dict(x0=hx-27.1, x1=hx-27.1+P['amsLength'], y0=2.0, y1=2.0+P['amsWidth'], z0=base+P['amsStandoff'], z1=base+P['amsStandoff']+P['amsHeight'])
+    bx('ESP32', P['esp32CenterX'], -hy+0.5+P['esp32Length']/2.0, P['esp32Width'], P['esp32Length'], base+P['esp32Standoff'], P['esp32Height'])
+    bz = base+1.0; bd = P['buzzerDiameter']
+    C['BUZZER'] = dict(x0=hx-0.5-P['buzzerHeight'], x1=hx-0.5, y0=P['buzzerY']-bd/2.0, y1=P['buzzerY']+bd/2.0, z0=bz, z1=bz+bd)
+    oy = P['oledCenterY']-P['oledActiveOffsetY']; opz = Zi-P['oledPostHeight']
+    bx('OLED_PCB', 0, oy, P['oledPcbWidth'], P['oledPcbHeight'], opz-1.6, 1.6)
+    bx('OLED_GLASS', 0, P['oledCenterY'], P['oledGlassWidth'], P['oledGlassHeight'], opz, P['oledGlassThickness'])
+    top = Zi-P['keyFlangeThickness']-P['tactHeight']-P['keyPlay']; r2 = P['keyRow1Y']-P['keyPitchY']
+    bx('KEYPAD_BOARD', 0, (P['keyRow1Y']+r2)/2.0, P['keypadBoardWidth'], P['keypadBoardHeight'], top-P['keypadBoardThickness']-P['keypadTailDepth'], P['keypadBoardThickness']+P['keypadTailDepth']+P['tactHeight'])
+    G = dict(hx=hx, hy=hy, base=base, Zi=Zi, boardTop=top, joinZ=P['splitHeight']+P['lipHeight']+P['shellGap'], oledPcbY=oy, row2Y=r2)
+    return C, G
+
+def gap3(a, b):
+    return max(a['x0']-b['x1'], b['x0']-a['x1'], a['y0']-b['y1'], b['y0']-a['y1'], a['z0']-b['z1'], b['z0']-a['z1'])
+
+def run_checks(P, C, G):
+    out = []; ok = True
+    def chk(label, val, need, op='>='):
+        nonlocal ok
+        passed = (val >= need) if op == '>=' else (val <= need)
+        if not passed: ok = False
+        out.append('%-4s %-52s %8.2f  (need %s %.2f)' % ('PASS' if passed else 'FAIL', label, val, op, need))
+    names = list(C.keys())
+    for i in range(len(names)):
+        for j in range(i+1, len(names)):
+            a, b = names[i], names[j]
+            if {a, b} == {'OLED_PCB', 'OLED_GLASS'}: continue
+            need = 25.0 if {a, b} == {'NRF24', 'BATTERY_HOLDER'} else (P['pcbClearance'] if {a, b} == {'SWITCH', 'BATTERY_HOLDER'} else 2.0)
+            chk('clearance %s <-> %s (mm)' % (a, b), gap3(C[a], C[b]), need) if gap3(C[a], C[b]) < 10 or need > 2.0 else None
+    for n in ('TP4056', 'BATTERY_HOLDER', 'NRF24', 'AMS1117', 'ESP32', 'BUZZER'):
+        c = C[n]; chk('wall clearance %s (min of 4 sides)' % n, min(c['x0']+G['hx'], G['hx']-c['x1'], c['y0']+G['hy'], G['hy']-c['y1']), 0.4)
+    chk('ESP32 USB centre <-> TP4056 USB centre (mm)', abs(P['esp32CenterX']-P['tpCenterX']), 30.0)
+    chk('NRF24 top -> OLED underside (Dupont 15 mm)', C['OLED_PCB']['z0']-C['NRF24']['z1'], P['dupontClearance'])
+    chk('Battery holder top -> hold-down rib (mm)', 0.3, 0.2)
+    chk('Battery top lead buffer to corner boss (mm)', G['hy']-P['screwBossDiameter']-C['BATTERY_HOLDER']['y1'], P['wireClearance'])
+    chk('Rear cavity height above floor vs holder (mm)', P['splitHeight']-C['BATTERY_HOLDER']['z1'], 2.0)
+    chk('ESP32 USB cutout top below split line (mm)', P['splitHeight']-(C['ESP32']['z0']+1.6+P['esp32UsbCenterAbovePcb']+P['usbCutoutHeight']/2.0), 1.0)
+    chk('TP4056 USB cutout bottom above floor (mm)', C['TP4056']['z0']+P['tpUsbCenterAbovePcb']-P['usbCutoutHeight']/2.0-G['base'], 1.0)
+    chk('Wall thickness (mm, FDM >= 1.6)', P['wallThickness'], 1.6)
+    chk('Key hole to key-hole web (mm)', P['keyPitchY']-P['buttonHoleDiameter'], 3.0)
+    chk('Keypad right edge to inner wall (mm)', G['hx']-(P['keyPitchX']+P['keycapDiameter']/2.0+1.0), 1.5)
+    vol_in = (2*G['hx'])*(2*G['hy'])*(P['enclosureHeight']-P['baseThickness']-P['frontPlateThickness'])
+    vol_c = sum((c['x1']-c['x0'])*(c['y1']-c['y0'])*(c['z1']-c['z0']) for n, c in C.items() if n != 'OLED_GLASS')
+    out.append('INFO internal volume %.0f cm3, component envelope volume %.0f cm3 (fill %.0f%%)' % (vol_in/1000.0, vol_c/1000.0, 100*vol_c/vol_in))
+    return ok, out
+
+# ======================= builders =======================
+def corner_centers(P, G):
+    r = P['screwBossDiameter']/2.0
+    return [(sx*(G['hx']-r), sy*(G['hy']-r)) for sx in (-1, 1) for sy in (-1, 1)]
+
+def floor_groups(P, C, G):
+    gr = {}; t = 1.2; c = P['pcbClearance']
+    def add(h, rs): gr.setdefault(round(h, 2), []).extend(rs)
+    E = C['ESP32']; sp = P['esp32Standoff']
+    rails = [(E['x0'], E['y0']+0.8, E['x1'], E['y0']+5.8), (E['x0'], E['y1']-5.8, E['x1'], E['y1']-0.8)]
+    add(sp, rails)
+    add(sp+1.6, [(E['x0']-c-t, r[1], E['x0']-c, r[3]) for r in rails]+[(E['x1']+c, r[1], E['x1']+c+t, r[3]) for r in rails]+[(E['x0']-c-t, E['y1']+c, E['x1']+c+t, E['y1']+c+t)])
+    T = C['TP4056']; ts = P['tpStandoff']
+    add(ts, [(T['x0']+1, T['y0']+1, T['x0']+6, T['y0']+6), (T['x1']-6, T['y0']+1, T['x1']-1, T['y0']+6), (T['x0']+1, T['y1']-6, T['x0']+6, T['y1']-1), (T['x1']-6, T['y1']-6, T['x1']-1, T['y1']-1)])
+    add(ts+1.0, ring_rects(T['x0'], T['x1'], T['y0'], T['y1'], c, t, 8, 'LRT'))
+    N = C['NRF24']; ns = P['nrfStandoff']
+    add(ns, [(N['x0']+1, N['y1']-8, N['x1']-1, N['y1']-3), (N['x0']+1, N['y0']+17, N['x1']-1, N['y0']+22)])
+    add(ns+1.6, ring_rects(N['x0'], N['x1'], N['y0'], N['y1'], c, t, 5, 'LRB'))
+    A = C['AMS1117']; ams = P['amsStandoff']
+    add(ams, [(A['x0']+1, A['y0'], A['x0']+4, A['y1']), (A['x1']-4, A['y0'], A['x1']-1, A['y1'])])
+    add(ams+1.0, [(A['x0'], A['y0']-c-t, A['x1'], A['y0']-c), (A['x0'], A['y1']+c, A['x1'], A['y1']+c+t)])
+    H = C['BATTERY_HOLDER']; hh = 10.0
+    add(hh, [(H['x1']+0.4, H['y0']-0.4-t, H['x1']+0.4+t, H['y1']+0.4+t)])
+    add(hh, [(H['x0'], H['y0']-0.4-t, H['x0']+6, H['y0']-0.4), (H['x1']-6, H['y0']-0.4-t, H['x1'], H['y0']-0.4), (H['x0'], H['y1']+0.4, H['x0']+6, H['y1']+0.4+t), (H['x1']-6, H['y1']+0.4, H['x1'], H['y1']+0.4+t)])
+    add(8.0, [(H['x1']+0.4+t+5.5, H['y0']+4, H['x1']+0.4+t+5.5+t, H['y1']-9)])
+    Z = C['BUZZER']; cy = P['buzzerY']; bd = P['buzzerDiameter']
+    add(0.8, [(Z['x0'], cy-3, Z['x1'], cy+3)])
+    add(7.0, [(Z['x0'], cy-bd/2-0.3-t, Z['x1'], cy-bd/2-0.3), (Z['x0'], cy+bd/2+0.3, Z['x1'], cy+bd/2+0.3+t)])
+    return gr
+
+def build_rear(master, P, C, G):
+    occ, comp = new_comp(master, 'REAR_SHELL')
+    W, Ln, r, wall, base, sp = P['enclosureWidth'], P['enclosureLength'], P['cornerRadius'], P['wallThickness'], P['baseThickness'], P['splitHeight']
+    lip, gap = P['lipHeight'], P['shellGap']
+    sk = sk_new(comp, 0, 'SK_REAR_OUTER'); rrect(sk, 0, 0, W, Ln, r)
+    body = ext(comp, sk, sp, NEW, 'EXT_REAR_OUTER').bodies.item(0); body.name = 'REAR_SHELL'
+    fillet_face(comp, body, False, P['edgeFillet'], 'FILLET_REAR_BOTTOM')
+    ins = wall/2.0+gap
+    sk = sk_new(comp, sp-0.3, 'SK_REAR_TONGUE'); rrect(sk, 0, 0, W-2*ins, Ln-2*ins, r-ins)
+    ext(comp, sk, lip+0.3, JOIN, 'EXT_REAR_TONGUE')
+    sk = sk_new(comp, base, 'SK_REAR_CAVITY'); rrect(sk, 0, 0, W-2*wall, Ln-2*wall, r-wall)
+    ext(comp, sk, sp+lip-base+0.5, CUT, 'CUT_REAR_CAVITY')
+    cc = corner_centers(P, G)
+    sk = sk_new(comp, base-0.3, 'SK_REAR_SCREW_BOSSES')
+    for x, y in cc: circ(sk, x, y, P['screwBossDiameter'])
+    ext(comp, sk, G['joinZ']-(base-0.3), JOIN, 'EXT_REAR_SCREW_BOSSES')
+    for h, rs in sorted(floor_groups(P, C, G).items()):
+        sk = sk_new(comp, base-0.3, 'SK_REAR_STANDOFFS_RIBS_H%.1f' % h)
+        for q in rs: rect(sk, *q)
+        ext(comp, sk, h+0.3, JOIN, 'EXT_REAR_STANDOFFS_RIBS_H%.1f' % h)
+    sk = sk_new(comp, 0, 'SK_REAR_SCREW_THROUGH')
+    for x, y in cc: circ(sk, x, y, P['m3Clearance'])
+    ext(comp, sk, G['joinZ']+0.5, CUT, 'CUT_REAR_SCREW_THROUGH')
+    sk = sk_new(comp, 0, 'SK_REAR_SCREW_CBORE')
+    for x, y in cc: circ(sk, x, y, P['m3HeadDiameter'])
+    ext(comp, sk, P['m3HeadDepth'], CUT, 'CUT_REAR_SCREW_CBORE')
+    tot = wall+2.0; hy2 = Ln/2.0-wall/2.0; hx2 = W/2.0-wall/2.0
+    uh, uw = P['usbCutoutHeight'], P['usbCutoutWidth']
+    ez = C['ESP32']['z0']+1.6+P['esp32UsbCenterAbovePcb']; tz = C['TP4056']['z0']+P['tpUsbCenterAbovePcb']
+    wall_cut(comp, 'Y', -hy2, [('rect', P['esp32CenterX']-uw/2, ez-uh/2, P['esp32CenterX']+uw/2, ez+uh/2), ('rect', P['tpCenterX']-uw/2, tz-uh/2, P['tpCenterX']+uw/2, tz+uh/2)], 'USB_CUTOUTS', tot)
+    sw, sh = P['switchCutoutWidth'], P['switchCutoutHeight']; sx, sz = P['switchCenterX'], P['switchCenterZ']
+    wall_cut(comp, 'Y', hy2, [('rect', sx-sw/2, sz-sh/2, sx+sw/2, sz+sh/2)], 'SWITCH_CUTOUT', tot)
+    nx = P['nrfCenterX']; nz = C['NRF24']['z0']+1.6+P['smaAxisAbovePcb']; ex = P['smaSlotExtra']; sd = P['smaHoleDiameter']
+    wall_cut(comp, 'Y', hy2, [('circ', nx, nz+ex/2, sd), ('circ', nx, nz-ex/2, sd), ('rect', nx-sd/2, nz-ex/2, nx+sd/2, nz+ex/2)], 'SMA_OPENING', tot)
+    bz = (C['BUZZER']['z0']+C['BUZZER']['z1'])/2.0; gd = P['grilleHoleDiameter']; by = P['buzzerY']; pitch = gd+1.4
+    holes = [('circ', by, bz, gd)]+[('circ', by+pitch*math.cos(math.radians(a)), bz+pitch*math.sin(math.radians(a)), gd) for a in range(0, 360, 60)]
+    wall_cut(comp, 'X', hx2, holes, 'BUZZER_GRILLE', tot)
+    return occ, comp, body
+
+def build_front(master, P, C, G):
+    occ, comp = new_comp(master, 'FRONT_SHELL')
+    W, Ln, r, wall, sp, H = P['enclosureWidth'], P['enclosureLength'], P['cornerRadius'], P['wallThickness'], P['splitHeight'], P['enclosureHeight']
+    lip, gap, Zi, plate = P['lipHeight'], P['shellGap'], G['Zi'], P['frontPlateThickness']
+    sk = sk_new(comp, sp, 'SK_FRONT_OUTER'); rrect(sk, 0, 0, W, Ln, r)
+    body = ext(comp, sk, H-sp, NEW, 'EXT_FRONT_OUTER').bodies.item(0); body.name = 'FRONT_SHELL'
+    fillet_face(comp, body, True, P['edgeFillet'], 'FILLET_FRONT_TOP')
+    sk = sk_new(comp, sp-0.2, 'SK_FRONT_CAVITY'); rrect(sk, 0, 0, W-2*wall, Ln-2*wall, r-wall)
+    ext(comp, sk, Zi-(sp-0.2), CUT, 'CUT_FRONT_CAVITY')
+    sk = sk_new(comp, sp-0.2, 'SK_FRONT_GROOVE'); rrect(sk, 0, 0, W-wall, Ln-wall, r-wall/2.0)
+    ext(comp, sk, lip+gap+0.2, CUT, 'CUT_FRONT_GROOVE')
+    cc = corner_centers(P, G)
+    sk = sk_new(comp, G['joinZ'], 'SK_FRONT_SCREW_BOSSES')
+    for x, y in cc: circ(sk, x, y, P['screwBossDiameter'])
+    ext(comp, sk, Zi+0.3-G['joinZ'], JOIN, 'EXT_FRONT_SCREW_BOSSES')
+    sk = sk_new(comp, G['joinZ'], 'SK_FRONT_SCREW_PILOTS')
+    for x, y in cc: circ(sk, x, y, P['m3Pilot'])
+    ext(comp, sk, Zi-1.6-G['joinZ'], CUT, 'CUT_FRONT_SCREW_PILOTS')
+    # posts grouped by their bottom Z
+    posts = {}; pilots = {}
+    opz = Zi-P['oledPostHeight']; ox, oy = 0.0, G['oledPcbY']
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            posts.setdefault(round(opz, 2), []).append(('c', sx*P['oledHoleDX']/2, oy+sy*P['oledHoleDY']/2, P['postDiameter']))
+    kx = P['keyPitchX']/2.0; r1 = P['keyRow1Y']; r2 = G['row2Y']
+    for sx in (-1, 1):
+        for y in (r1+5.0, (r1+r2)/2.0, r2-5.0): posts.setdefault(round(G['boardTop'], 2), []).append(('c', sx*kx, y, P['postDiameter']))
+    Hh = C['BATTERY_HOLDER']; hx0 = (Hh['x0']+Hh['x1'])/2.0
+    for yy in (17.0, 41.0): posts.setdefault(round(Hh['z1']+0.3, 2), []).append(('r', hx0-7, yy-1.5, hx0+7, yy+1.5))
+    for z, items in sorted(posts.items()):
+        sk = sk_new(comp, z, 'SK_FRONT_POSTS_Z%.1f' % z)
+        for it in items:
+            if it[0] == 'c': circ(sk, it[1], it[2], it[3])
+            else: rect(sk, *it[1:])
+        ext(comp, sk, Zi+0.3-z, JOIN, 'EXT_FRONT_POSTS_Z%.1f' % z)
+        cs = [it for it in items if it[0] == 'c']
+        if cs:
+            sk = sk_new(comp, z, 'SK_FRONT_POST_PILOTS_Z%.1f' % z)
+            for it in cs: circ(sk, it[1], it[2], P['m2Pilot'])
+            ext(comp, sk, min(8.0, Zi-z+1.0), CUT, 'CUT_FRONT_POST_PILOTS_Z%.1f' % z)
+    # OLED window + key holes
+    sk = sk_new(comp, Zi-0.2, 'SK_OLED_WINDOW'); rect(sk, -P['oledWindowWidth']/2, P['oledCenterY']-P['oledWindowHeight']/2, P['oledWindowWidth']/2, P['oledCenterY']+P['oledWindowHeight']/2)
+    ext(comp, sk, plate+0.7, CUT, 'CUT_OLED_WINDOW')
+    sk = sk_new(comp, Zi-0.2, 'SK_KEY_HOLES')
+    for x, y in keycentres(P, G): circ(sk, x, y, P['buttonHoleDiameter'])
+    ext(comp, sk, plate+0.7, CUT, 'CUT_KEY_HOLES')
+    try:
+        sk = sk_new(comp, H-0.4, 'SK_FRONT_LABEL'); add_text(sk, 'NRF24 LINK', 5.0, 0, 50.0, 40.0)
+        ext(comp, sk, 0.6, CUT, 'CUT_FRONT_LABEL', text_profiles(sk))
+    except: warn('Front label engraving skipped')
+    return occ, comp, body
+
+def keycentres(P, G):
+    return [(c*P['keyPitchX'], y) for y in (P['keyRow1Y'], G['row2Y']) for c in (-1, 0, 1)]
+
+LABELS = [('1', 'ABCDEF'), ('2', 'GHIJKLM'), ('3', 'NOPQRST'), ('4', 'UVWXYZ'), ('5', 'SPACE'), ('6', 'DEL/SEND')]
+
+def build_keycaps(master, P, G):
+    occ, comp = new_comp(master, 'KEYCAPS')
+    fz = G['Zi']-P['keyFlangeThickness']; top = P['enclosureHeight']+P['keycapProtrusion']; kc = keycentres(P, G)
+    sk = sk_new(comp, fz, 'SK_KEYCAP_FLANGES')
+    for x, y in kc: circ(sk, x, y, P['buttonHoleDiameter']+2.0)
+    ext(comp, sk, P['keyFlangeThickness'], NEW, 'EXT_KEYCAP_FLANGES')
+    sk = sk_new(comp, fz+0.3, 'SK_KEYCAP_CAPS')
+    for x, y in kc: circ(sk, x, y, P['keycapDiameter'])
+    ext(comp, sk, top-(fz+0.3), JOIN, 'EXT_KEYCAP_CAPS')
+    bodies = sorted([comp.bRepBodies.item(i) for i in range(comp.bRepBodies.count)], key=lambda b: (-round(b.boundingBox.minPoint.y, 1), b.boundingBox.minPoint.x))
+    for i, b in enumerate(bodies): b.name = 'KEYCAP_%d' % (i+1)
+    try:
+        edges = adsk.core.ObjectCollection.create()
+        for b in bodies:
+            best = None
+            for f in b.faces:
+                if f.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType and (best is None or f.pointOnFace.z > best.pointOnFace.z): best = f
+            for e in best.edges: edges.add(e)
+        fi = comp.features.filletFeatures.createInput(); fi.addConstantRadiusEdgeSet(edges, vi(1.0), True); comp.features.filletFeatures.add(fi).name = 'FILLET_KEYCAP_TOPS'
+    except: warn('Keycap fillet skipped')
+    try:
+        sk = sk_new(comp, top, 'SK_KEYCAP_LABELS')
+        for (x, y), (n, t) in zip(kc, LABELS):
+            add_text(sk, n, 3.0, x, y+2.6, 12.0); add_text(sk, t, 1.9, x, y-2.8, 13.0)
+        ext(comp, sk, 0.4, JOIN, 'EXT_KEYCAP_LABELS', text_profiles(sk))
+    except: warn('Keycap label text skipped')
+    return occ, comp
+
+def build_refs(master, P, C, G):
+    occ, comp = new_comp(master, 'REFERENCE_ENVELOPES_HIDDEN_FOR_CHECKS'); bodies = []
+    for n in ('ESP32', 'TP4056', 'AMS1117', 'BATTERY_HOLDER', 'SWITCH', 'OLED_PCB', 'OLED_GLASS', 'KEYPAD_BOARD', 'NRF24'):
+        c = C[n]; bodies.append(box_body(comp, c['x0'], c['y0'], c['z0'], c['x1'], c['y1'], c['z1'], 'REF_' + n))
+    try:
+        Z = C['BUZZER']; cy = P['buzzerY']; cz = (Z['z0']+Z['z1'])/2.0; sk = vsketch(comp, 'X', (Z['x0']+Z['x1'])/2.0, 'SK_REF_BUZZER')
+        sk.sketchCurves.sketchCircles.addByCenterRadius(msp(sk, (Z['x0']+Z['x1'])/2.0, cy, cz), mm(P['buzzerDiameter']/2.0))
+        f = ext_sym(comp, sk, P['buzzerHeight'], NEW, 'EXT_REF_BUZZER'); f.bodies.item(0).name = 'REF_BUZZER'; bodies.append(f.bodies.item(0))
+        N = C['NRF24']; ny = N['y1']+P['nrfConnectorExt']/2.0; nz = N['z0']+1.6+P['smaAxisAbovePcb']; sk = vsketch(comp, 'Y', ny, 'SK_REF_SMA')
+        sk.sketchCurves.sketchCircles.addByCenterRadius(msp(sk, P['nrfCenterX'], ny, nz), mm(P['nrfConnectorDia']/2.0))
+        f = ext_sym(comp, sk, P['nrfConnectorExt'], NEW, 'EXT_REF_SMA'); f.bodies.item(0).name = 'REF_NRF24_SMA_CONNECTOR'; bodies.append(f.bodies.item(0))
+    except: warn('Cylindrical reference bodies skipped')
+    return occ, comp, bodies
+
+# ======================= colours =======================
+APPS = {}
+COLORS = {'black':(28,28,30),'dark':(20,24,38),'gray':(70,70,75),'silver':(205,205,210),'gold':(214,175,55),'blue':(20,70,170),
+          'green':(25,120,60),'red':(205,30,30),'white':(235,235,235),'screen':(8,8,18),'oled':(70,110,210),'cell':(30,125,85),
+          'shell_rear':(52,56,64),'shell_front':(75,82,95),'keycap':(225,225,228)}
+
+def make_apps(app, design):
+    base = None
+    try:
+        for i in range(app.materialLibraries.count):
+            lib = app.materialLibraries.item(i)
+            if 'ppearance' not in lib.name: continue
+            for cand in ('Plastic - Matte (Black)', 'Plastic - Glossy (Black)', 'Paint - Enamel Glossy (Black)', 'Plastic - Matte (White)', 'ABS (White)'):
+                try: a = lib.appearances.itemByName(cand)
+                except: a = None
+                if a: base = a; break
+            if base: break
+    except: pass
+    if base is None: warn('Appearance library not found - parts keep the default colour'); return
+    for k, (r, g, b) in COLORS.items():
+        try:
+            ap = design.appearances.addByCopy(base, 'HC_' + k)
+            cp = adsk.core.ColorProperty.cast(ap.appearanceProperties.itemByName('Color'))
+            cp.value = adsk.core.Color.create(r, g, b, 255); APPS[k] = ap
+        except: pass
+
+def paint(b, key):
+    try:
+        if key in APPS: b.appearance = APPS[key]
+    except: pass
+
+# ======================= detailed visual models (not printed, not exported) =======================
+def vb(comp, x0, y0, z0, x1, y1, z1, name, key):
+    b = box_body(comp, x0, y0, z0, x1, y1, z1, name); paint(b, key); return b
+
+def vmulti(comp, z0, z1, drawer, name, key):
+    sk = sk_new(comp, z0, 'SK_' + name); drawer(sk)
+    f = ext(comp, sk, z1-z0, NEW, 'EXT_' + name)
+    for i in range(f.bodies.count):
+        b = f.bodies.item(i); b.name = '%s_%d' % (name, i+1); paint(b, key)
+
+def vpcb(comp, x0, y0, z0, x1, y1, z1, holes, name, key):
+    sk = sk_new(comp, z0, 'SK_' + name); rect(sk, x0, y0, x1, y1)
+    for h in holes: circ(sk, h[0], h[1], h[2])
+    prof = None
+    try: prof = [max([sk.profiles.item(i) for i in range(sk.profiles.count)], key=lambda p: p.areaProperties().area)]
+    except: prof = None
+    b = ext(comp, sk, z1-z0, NEW, 'EXT_' + name, prof).bodies.item(0); b.name = name; paint(b, key); return b
+
+def vcyl(comp, axis, c, a, b_, d, length, name, key):
+    """cylinder along X (axis 'X': a=y, b_=z) or along Y (axis 'Y': a=x, b_=z); c = centre coordinate along the axis"""
+    sk = vsketch(comp, axis, c, 'SK_' + name)
+    p = msp(sk, c, a, b_) if axis == 'X' else msp(sk, a, c, b_)
+    sk.sketchCurves.sketchCircles.addByCenterRadius(p, mm(d/2.0))
+    b = ext_sym(comp, sk, length, NEW, 'EXT_' + name).bodies.item(0); b.name = name; paint(b, key); return b
+
+def vzcyl(comp, x, y, z0, z1, d, name, key):
+    sk = sk_new(comp, z0, 'SK_' + name); circ(sk, x, y, d)
+    b = ext(comp, sk, z1-z0, NEW, 'EXT_' + name).bodies.item(0); b.name = name; paint(b, key); return b
+
+def build_visuals(master, P, C, G):
+    occ, root_c = new_comp(master, 'COMPONENT_MODELS_VISUAL')
+    def sub(n): return new_comp(root_c, n)[1]
+    # ---- ESP32 DevKit 30-pin Type-C ----
+    c = sub('ESP32_DEVKIT_30PIN_USB_C'); E = C['ESP32']; z0 = E['z0']; zt = z0+1.6; cx = (E['x0']+E['x1'])/2.0; y0, y1 = E['y0'], E['y1']
+    vpcb(c, E['x0'], y0, z0, E['x1'], y1, zt, [], 'ESP32_PCB', 'black')
+    vb(c, cx-9, y1-6.5, zt, cx+9, y1, zt+0.1, 'ESP32_ANTENNA_AREA', 'gold')
+    vb(c, cx-9, y1-6.5-25.5, zt, cx+9, y1-6.5, zt+3.1, 'ESP32_WROOM32_SHIELD', 'silver')
+    vb(c, cx-4.47, y0-0.8, zt, cx+4.47, y0+6.5, zt+3.2, 'ESP32_USB_C', 'silver')
+    vb(c, cx-2.5, y0+10, zt, cx+2.5, y0+15, zt+0.9, 'ESP32_CP2102', 'black')
+    vb(c, cx-10.8, y0+1.5, zt, cx-7.2, y0+7.5, zt+2.5, 'ESP32_EN_BUTTON', 'gray')
+    vb(c, cx+7.2, y0+1.5, zt, cx+10.8, y0+7.5, zt+2.5, 'ESP32_BOOT_BUTTON', 'gray')
+    vb(c, cx+5, y0+10, zt, cx+11.5, y0+17, zt+1.7, 'ESP32_REGULATOR', 'black')
+    vb(c, cx-9, y0+11, zt, cx-7.4, y0+11.8, zt+0.6, 'ESP32_LED', 'red')
+    for sx, nm in ((-1, 'L'), (1, 'R')): vb(c, cx+sx*12.7-1.27, y0+6, z0-2.5, cx+sx*12.7+1.27, y0+6+38.1, z0, 'ESP32_HEADER_' + nm, 'black')
+    vmulti(c, z0-8.5, z0, lambda sk: [rect(sk, cx+sx*12.7-0.32, y0+7.27+2.54*i-0.32, cx+sx*12.7+0.32, y0+7.27+2.54*i+0.32) for sx in (-1, 1) for i in range(15)], 'ESP32_PIN', 'gold')
+    # ---- TP4056 Type-C charger ----
+    c = sub('TP4056_TYPE_C_CHARGER'); T = C['TP4056']; z0 = T['z0']; zt = z0+1.0; cx = (T['x0']+T['x1'])/2.0; y0, y1 = T['y0'], T['y1']
+    vpcb(c, T['x0'], y0, z0, T['x1'], y1, zt, [], 'TP4056_PCB', 'blue')
+    vb(c, cx-4.47, y0, zt, cx+4.47, y0+7.3, zt+3.2, 'TP4056_USB_C', 'silver')
+    vb(c, cx-6.5, y0+11, zt, cx-1.6, y0+14.9, zt+1.5, 'TP4056_IC', 'black')
+    vb(c, cx+1.0, y0+11, zt, cx+4.0, y0+12.6, zt+1.0, 'TP4056_DW01', 'black')
+    vb(c, cx+1.0, y0+14, zt, cx+4.0, y0+15.6, zt+1.0, 'TP4056_FS8205', 'black')
+    vb(c, cx+5.0, y0+11, zt, cx+8.2, y0+12.6, zt+0.7, 'TP4056_LED_RED', 'red')
+    vb(c, cx+5.0, y0+14, zt, cx+8.2, y0+15.6, zt+0.7, 'TP4056_LED_GREEN', 'green')
+    vmulti(c, zt, zt+0.15, lambda sk: [rect(sk, px-1.5, y1-3.5, px+1.5, y1-0.5) for px in (T['x0']+2.5, T['x0']+6.5, T['x1']-6.5, T['x1']-2.5)], 'TP4056_PAD', 'gold')
+    # ---- AMS1117 3.3 V module ----
+    c = sub('AMS1117_3V3_MODULE'); A = C['AMS1117']; z0 = A['z0']; zt = z0+1.0; cx = (A['x0']+A['x1'])/2.0; cy = (A['y0']+A['y1'])/2.0
+    vpcb(c, A['x0'], A['y0'], z0, A['x1'], A['y1'], zt, [], 'AMS1117_PCB', 'blue')
+    vb(c, cx-3.25, cy-1.75, zt, cx+3.25, cy+1.75, zt+1.7, 'AMS1117_SOT223', 'black')
+    vb(c, cx+6.0, cy-0.75, zt, cx+9.0, cy+0.75, zt+0.6, 'AMS1117_LED', 'red')
+    vmulti(c, zt, zt+6.0, lambda sk: [rect(sk, px-0.32, cy+k*1.27-0.32, px+0.32, cy+k*1.27+0.32) for px in (A['x0']+2.5, A['x1']-2.5) for k in (-1, 1)], 'AMS1117_PIN', 'gold')
+    # ---- NRF24L01+ PA+LNA with RP-SMA jack (+ antenna) ----
+    c = sub('NRF24L01_PA_LNA_RP_SMA'); N = C['NRF24']; z0 = N['z0']; zt = z0+1.6; cx = (N['x0']+N['x1'])/2.0; y0, y1 = N['y0'], N['y1']
+    vpcb(c, N['x0'], y0, z0, N['x1'], y1, zt, [], 'NRF24_PCB', 'dark')
+    vb(c, cx-2.54, y0+1.0, zt, cx+2.54, y0+11.16, zt+2.5, 'NRF24_HEADER', 'black')
+    vmulti(c, zt+2.5, zt+8.0, lambda sk: [rect(sk, cx+k*1.27-0.32, y0+2.27+2.54*i-0.32, cx+k*1.27+0.32, y0+2.27+2.54*i+0.32) for k in (-1, 1) for i in range(4)], 'NRF24_PIN', 'gold')
+    vb(c, cx-6.5, y0+16, zt, cx+6.5, y0+28, zt+2.2, 'NRF24_RF_SHIELD', 'silver')
+    vb(c, cx-2, y0+12.5, zt, cx+2, y0+15.5, zt+0.9, 'NRF24_CHIP', 'black')
+    vb(c, cx+3.5, y0+12.5, zt, cx+6.7, y0+15, zt+0.8, 'NRF24_CRYSTAL', 'silver')
+    vb(c, cx-3.25, y1-4, zt, cx+3.25, y1, zt+6.0, 'NRF24_SMA_BASE', 'silver')
+    nz = zt+P['smaAxisAbovePcb']
+    vcyl(c, 'Y', y1+P['nrfConnectorExt']/2.0, cx, nz, P['nrfConnectorDia'], P['nrfConnectorExt'], 'NRF24_SMA_BARREL', 'gold')
+    if SHOW_ANTENNA:
+        yy = G['hy']+P['wallThickness']+4.2
+        vcyl(c, 'Y', yy, cx, nz, 8.0, 8.0, 'ANTENNA_COUPLING_NUT', 'silver')
+        vzcyl(c, cx, yy, nz-4.0, nz+100.0, 7.0, 'ANTENNA_WHIP_2_4GHZ', 'black')
+    # ---- OLED 0.96" I2C ----
+    c = sub('OLED_096_I2C_SSD1306'); Op = C['OLED_PCB']; Gl = C['OLED_GLASS']; z0 = Op['z0']; zt = Op['z1']; oy = G['oledPcbY']; cyo = P['oledCenterY']
+    holes = [(sx*P['oledHoleDX']/2.0, oy+sy*P['oledHoleDY']/2.0, 2.0) for sx in (-1, 1) for sy in (-1, 1)]
+    vpcb(c, Op['x0'], Op['y0'], z0, Op['x1'], Op['y1'], zt, holes, 'OLED_PCB', 'blue')
+    vb(c, Gl['x0'], Gl['y0'], zt, Gl['x1'], Gl['y1'], zt+1.4, 'OLED_GLASS', 'screen')
+    vb(c, -10.87, cyo-5.43, zt+1.4, 10.87, cyo+5.43, zt+1.45, 'OLED_ACTIVE_AREA', 'oled')
+    vb(c, -5.1, Op['y1']-3.5, z0-2.5, 5.1, Op['y1']-1.0, z0, 'OLED_HEADER', 'black')
+    vmulti(c, z0-6.0, z0, lambda sk: [rect(sk, px-0.32, Op['y1']-2.25-0.32, px+0.32, Op['y1']-2.25+0.32) for px in (-3.81, -1.27, 1.27, 3.81)], 'OLED_PIN', 'gold')
+    # ---- keypad perfboard + 6 tact switches ----
+    c = sub('KEYPAD_PERFBOARD_6_TACT'); Kb = C['KEYPAD_BOARD']; top = G['boardTop']; kc = keycentres(P, G); kx = P['keyPitchX']/2.0
+    r1, r2 = P['keyRow1Y'], G['row2Y']
+    holes = [(sx*kx, y, P['m2Clearance']) for sx in (-1, 1) for y in (r1+5.0, (r1+r2)/2.0, r2-5.0)]
+    vpcb(c, Kb['x0'], Kb['y0'], top-P['keypadBoardThickness'], Kb['x1'], Kb['y1'], top, holes, 'PERFBOARD', 'green')
+    for i, (x, y) in enumerate(kc): vb(c, x-3, y-3, top, x+3, y+3, top+4.2, 'TACT_%d_BODY' % (i+1), 'gray')
+    vmulti(c, top+4.2, top+P['tactHeight'], lambda sk: [circ(sk, x, y, 3.5) for x, y in kc], 'TACT_PLUNGER', 'silver')
+    # ---- buzzer ----
+    c = sub('BUZZER_12MM'); Z = C['BUZZER']
+    vcyl(c, 'X', (Z['x0']+Z['x1'])/2.0, P['buzzerY'], (Z['z0']+Z['z1'])/2.0, P['buzzerDiameter'], P['buzzerHeight'], 'BUZZER_BODY', 'black')
+    # ---- 18650 holder + cell ----
+    c = sub('BATTERY_HOLDER_18650_WITH_CELL'); H = C['BATTERY_HOLDER']; hx0 = (H['x0']+H['x1'])/2.0; z0 = H['z0']
+    vb(c, H['x0'], H['y0'], z0, H['x1'], H['y1'], z0+0.8, 'HOLDER_BASE', 'black')
+    vb(c, H['x0'], H['y0']+4, z0+0.8, H['x0']+1.8, H['y1']-4, z0+12, 'HOLDER_WALL_L', 'black')
+    vb(c, H['x1']-1.8, H['y0']+4, z0+0.8, H['x1'], H['y1']-4, z0+12, 'HOLDER_WALL_R', 'black')
+    vb(c, H['x0'], H['y0'], z0+0.8, H['x1'], H['y0']+4, z0+16, 'HOLDER_END_NEG', 'black')
+    vb(c, H['x0'], H['y1']-4, z0+0.8, H['x1'], H['y1'], z0+16, 'HOLDER_END_POS', 'black')
+    vb(c, hx0-4, H['y1']-4.4, z0+6, hx0+4, H['y1']-4, z0+14, 'HOLDER_CONTACT_POS', 'silver')
+    vcyl(c, 'Y', H['y0']+4.7, hx0, z0+10.0, 5.0, 1.4, 'HOLDER_SPRING_NEG', 'silver')
+    vcyl(c, 'Y', (H['y0']+H['y1'])/2.0, hx0, z0+0.8+P['cellDiameter']/2.0, P['cellDiameter'], 65.2, 'CELL_18650', 'cell')
+    vb(c, hx0+1.3, H['y1'], z0+7.3, hx0+2.7, H['y1']+5, z0+8.7, 'WIRE_RED', 'red')
+    vb(c, hx0-2.7, H['y0']-2.5, z0+7.3, hx0-1.3, H['y0'], z0+8.7, 'WIRE_BLACK', 'black')
+    # ---- KCD1-11 rocker switch ----
+    c = sub('KCD1_11_ROCKER_SWITCH'); sx, sz = P['switchCenterX'], P['switchCenterZ']; hy = G['hy']; wl = P['wallThickness']
+    vb(c, sx-9.6, hy-14, sz-6.45, sx+9.6, hy+wl, sz+6.45, 'SWITCH_BODY', 'black')
+    vb(c, sx-10.75, hy+wl, sz-7.6, sx+10.75, hy+wl+1.0, sz+7.6, 'SWITCH_BEZEL', 'black')
+    vb(c, sx-8.5, hy+wl+1.0, sz-5.0, sx+8.5, hy+wl+3.5, sz+5.0, 'SWITCH_ROCKER', 'red')
+    for k in (-1, 1): vb(c, sx+k*4-2.375, hy-20, sz-0.4, sx+k*4+2.375, hy-14, sz+0.4, 'SWITCH_TERMINAL_%s' % ('A' if k < 0 else 'B'), 'gold')
+    return occ
+
+# ======================= DXF sheets =======================
+def wall_panel(sk, ox, oy, w, h, shapes):
+    rect(sk, ox, oy, ox+w, oy+h)
+    for s in shapes:
+        if s[0] == 'rect': rect(sk, ox+s[1], oy+s[2], ox+s[3], oy+s[4])
+        else: circ(sk, ox+s[1], oy+s[2], s[3])
+
+def dxf_shapes(P, C, G):
+    W, L = P['enclosureWidth'], P['enclosureLength']; uh, uw = P['usbCutoutHeight'], P['usbCutoutWidth']
+    ez = C['ESP32']['z0']+1.6+P['esp32UsbCenterAbovePcb']; tz = C['TP4056']['z0']+P['tpUsbCenterAbovePcb']
+    u = lambda x: x+W/2.0
+    usb = [('rect', u(P['esp32CenterX'])-uw/2, ez-uh/2, u(P['esp32CenterX'])+uw/2, ez+uh/2), ('rect', u(P['tpCenterX'])-uw/2, tz-uh/2, u(P['tpCenterX'])+uw/2, tz+uh/2)]
+    sw, sh = P['switchCutoutWidth'], P['switchCutoutHeight']; sx, sz = u(P['switchCenterX']), P['switchCenterZ']
+    swc = [('rect', sx-sw/2, sz-sh/2, sx+sw/2, sz+sh/2)]
+    nx = u(P['nrfCenterX']); nz = C['NRF24']['z0']+1.6+P['smaAxisAbovePcb']; ex = P['smaSlotExtra']; sd = P['smaHoleDiameter']
+    sma = [('circ', nx, nz+ex/2, sd), ('circ', nx, nz-ex/2, sd), ('rect', nx-sd/2, nz-ex/2, nx+sd/2, nz+ex/2)]
+    bz = (C['BUZZER']['z0']+C['BUZZER']['z1'])/2.0; gd = P['grilleHoleDiameter']; pitch = gd+1.4; by = P['buzzerY']+L/2.0
+    gril = [('circ', by, bz, gd)]+[('circ', by+pitch*math.cos(math.radians(a)), bz+pitch*math.sin(math.radians(a)), gd) for a in range(0, 360, 60)]
+    return usb, swc, sma, gril
+
+def front_features(sk, P, G, ox=0.0, oy=0.0):
+    rrect(sk, ox, oy, P['enclosureWidth'], P['enclosureLength'], P['cornerRadius'])
+    rect(sk, ox-P['oledWindowWidth']/2, oy+P['oledCenterY']-P['oledWindowHeight']/2, ox+P['oledWindowWidth']/2, oy+P['oledCenterY']+P['oledWindowHeight']/2)
+    for x, y in keycentres(P, G): circ(sk, ox+x, oy+y, P['buttonHoleDiameter'])
+
+def rear_features(sk, P, G, ox=0.0, oy=0.0):
+    rrect(sk, ox, oy, P['enclosureWidth'], P['enclosureLength'], P['cornerRadius'])
+    for x, y in corner_centers(P, G): circ(sk, ox+x, oy+y, P['m3Clearance'])
+
+def build_dxf(master, P, C, G, outdir):
+    occ, comp = new_comp(master, 'DXF_SKETCHES'); W, L = P['enclosureWidth'], P['enclosureLength']; files = []
+    usb, swc, sma, gril = dxf_shapes(P, C, G); sph = P['splitHeight']
+    def sheet(name, fn):
+        sk = sk_new(comp, 0, name); fn(sk)
+        try: sk.saveAsDXF(os.path.join(outdir, name+'.dxf')); files.append(name+'.dxf')
+        except: warn('DXF export failed: '+name)
+    sheet('01_FRONT_PANEL', lambda sk: front_features(sk, P, G))
+    sheet('02_REAR_PANEL', lambda sk: rear_features(sk, P, G))
+    def oled(sk):
+        rect(sk, -P['oledWindowWidth']/2, -P['oledWindowHeight']/2, P['oledWindowWidth']/2, P['oledWindowHeight']/2)
+        rect(sk, -P['oledPcbWidth']/2, -P['oledPcbHeight']/2+P['oledActiveOffsetY'], P['oledPcbWidth']/2, P['oledPcbHeight']/2+P['oledActiveOffsetY'])
+        for sx in (-1, 1):
+            for sy in (-1, 1): circ(sk, sx*P['oledHoleDX']/2, P['oledActiveOffsetY']+sy*P['oledHoleDY']/2, P['m2Clearance'])
+    sheet('03_OLED_PANEL', oled)
+    def keys(sk):
+        for x, y in keycentres(P, G):
+            circ(sk, x, y, P['buttonHoleDiameter']); circ(sk, x, y, P['buttonHoleDiameter']+2.0); rect(sk, x-3, y-3, x+3, y+3)
+        r1, r2 = P['keyRow1Y'], G['row2Y']; bh = P['keypadBoardHeight']; cy = (r1+r2)/2.0
+        rect(sk, -P['keypadBoardWidth']/2, cy-bh/2, P['keypadBoardWidth']/2, cy+bh/2)
+        for sx in (-1, 1):
+            for y in (r1+5.0, cy, r2-5.0): circ(sk, sx*P['keyPitchX']/2, y, P['m2Clearance'])
+    sheet('04_BUTTON_PATTERN', keys)
+    sheet('05_SWITCH_CUTOUT', lambda sk: wall_panel(sk, -W/2, 0, W, sph, swc))
+    sheet('06_USB_CUTOUTS', lambda sk: wall_panel(sk, -W/2, 0, W, sph, usb))
+    sheet('07_SMA_CUTOUT', lambda sk: wall_panel(sk, -W/2, 0, W, sph, sma))
+    def flat(sk):
+        front_features(sk, P, G, 0, 0); rear_features(sk, P, G, W+15, 0)
+        y0 = -L/2-15-sph; wall_panel(sk, -W/2, y0, W, sph, usb)
+        wall_panel(sk, W/2+10, y0, W, sph, swc[:1]+sma)
+        wall_panel(sk, -W/2, y0-sph-10, L, sph, gril)
+        wall_panel(sk, -W/2+L+10, y0-sph-10, L, sph, [])
+    sheet('08_FULL_FLAT_PROFILE', flat)
+    return occ, comp, files
+
+# ======================= main =======================
+def read_existing(app, P):
+    try:
+        d = adsk.fusion.Design.cast(app.activeProduct)
+        if d and d.userParameters.itemByName('enclosureLength'):
+            for k in P:
+                prm = d.userParameters.itemByName(k)
+                if prm and isinstance(prm.value, (int, float)): P[k] = prm.value*10.0
+            return True
+    except: pass
+    return False
+
+def run(context):
+    ui = None
+    try:
+        app = adsk.core.Application.get(); ui = app.userInterface
+        P = dict(PARAMS); reused = read_existing(app, P)
+        C, G = layout(P); ok, report = run_checks(P, C, G)
+        if not ok:
+            r = ui.messageBox('Pre-build fit check FAILED:\n\n' + '\n'.join(l for l in report if l.startswith('FAIL')) + '\n\nBuild anyway?', 'Fit check', adsk.core.MessageBoxButtonTypes.YesNoButtonType)
+            if r != adsk.core.DialogResults.DialogYes: return
+        outdir = os.path.join(os.path.expanduser('~'), 'Documents', 'HANDHELD_COMMUNICATOR_EXPORT'); os.makedirs(outdir, exist_ok=True)
+        app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
+        design = adsk.fusion.Design.cast(app.activeProduct)
+        try: design.fusionUnitsManager.distanceDisplayUnits = adsk.fusion.DistanceUnits.MillimeterDistanceUnits
+        except: pass
+        for k, v in P.items():
+            try: design.userParameters.add(k, adsk.core.ValueInput.createByString('%s mm' % repr(float(v))), 'mm', 'Handheld communicator parameter')
+            except: warn('Parameter not created: ' + k)
+        make_apps(app, design)
+        root = design.rootComponent
+        mocc = root.occurrences.addNewComponent(adsk.core.Matrix3D.create()); master = mocc.component; master.name = 'HANDHELD_COMMUNICATOR_MODEL'
+        rocc, rcomp, rbody = build_rear(master, P, C, G)
+        paint(rbody, 'shell_rear')
+        focc, fcomp, fbody = build_front(master, P, C, G)
+        paint(fbody, 'shell_front')
+        kocc, kcomp = build_keycaps(master, P, G)
+        for i in range(kcomp.bRepBodies.count): paint(kcomp.bRepBodies.item(i), 'keycap')
+        xocc, xcomp, refs = build_refs(master, P, C, G)
+        vocc = build_visuals(master, P, C, G)
+        docc, dcomp, files = build_dxf(master, P, C, G, outdir)
+        try: docc.isLightBulbOn = False
+        except: pass
+        # Fusion interference analysis of the real model (shells + keycaps + hidden envelope bodies)
+        interf = 'not run'
+        try:
+            col = adsk.core.ObjectCollection.create()
+            for o in (rocc, focc, kocc, xocc):
+                px = o.createForAssemblyContext(mocc)
+                for i in range(px.bRepBodies.count): col.add(px.bRepBodies.item(i))
+            inp = design.createInterferenceInput(col); inp.areCoincidentFacesInterference = False
+            res = design.analyzeInterference(inp); lines = []
+            for i in range(res.count):
+                it = res.item(i); lines.append('%s <-> %s  %.3f mm3' % (it.entityOne.name, it.entityTwo.name, it.interferenceBody.volume*1000.0))
+            interf = 'NONE' if not lines else '\n'.join(lines)
+        except: interf = 'Fusion interference analysis could not run (see analytic checks)'
+        # envelopes stay hidden; the detailed component models stay visible inside the enclosure
+        try: xocc.isLightBulbOn = False
+        except: pass
+        try: vocc.isLightBulbOn = bool(SHOW_COMPONENTS)
+        except: pass
+        if SHOW_COMPONENTS:
+            try: focc.opacity = 0.35   # ghost the front shell so the parts inside are visible
+            except: warn('Front shell transparency not applied - hide FRONT_SHELL manually to see inside')
+        exp = design.exportManager; made = []
+        for comp, nm in ((rcomp, 'REAR_SHELL'), (fcomp, 'FRONT_SHELL'), (kcomp, 'KEYCAPS')):
+            try:
+                o = exp.createSTLExportOptions(comp, os.path.join(outdir, nm+'.stl')); o.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementHigh
+                exp.execute(o); made.append(nm+'.stl')
+            except: warn('STL export failed: '+nm)
+        try:
+            exp.execute(exp.createFusionArchiveExportOptions(os.path.join(outdir, 'HANDHELD_COMMUNICATOR_MODEL.f3d'), root)); made.append('HANDHELD_COMMUNICATOR_MODEL.f3d')
+        except: warn('F3D archive export failed - use File > Export')
+        place = ['PLACEMENT (mm, centre origin): %-15s X %7.1f..%7.1f  Y %7.1f..%7.1f  Z %6.1f..%6.1f' % ((n,) + tuple(c[k] for k in ('x0', 'x1', 'y0', 'y1', 'z0', 'z1'))) for n, c in C.items()]
+        txt = '\n'.join(report)+'\n\n'+'\n'.join(place)+'\n\nFusion interference analysis: '+interf+'\n\nWarnings:\n'+('\n'.join(WARN) if WARN else 'none')
+        open(os.path.join(outdir, 'CLEARANCE_REPORT.txt'), 'w').write(txt)
+        ui.messageBox('Done. Output folder:\n%s\n\nDXF: %d files\nOther: %s\n\nFit check: %s\nInterference: %s\nWarnings: %d (see CLEARANCE_REPORT.txt)' % (outdir, len(files), ', '.join(made), 'ALL PASS' if ok else 'SEE REPORT', interf.split('\n')[0], len(WARN)), 'HANDHELD COMMUNICATOR')
+    except:
+        if ui: ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
