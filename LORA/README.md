@@ -1,243 +1,346 @@
-# Handheld NRF24 Long-Range Communicator: Parametric Enclosure Generator
+<p align="center">
+  <img src="assets/photos/prototype-front.png" alt="LongRangeText Node 1 prototype: 3D-printed enclosure with OLED, six buttons and external antenna" width="45%">
+</p>
 
-A single Fusion 360 Python script that builds a complete, 3D-printable, two-piece handheld enclosure for an **ESP32 + NRF24L01+ PA+LNA** communicator. It also generates detailed visual models of every internal component, runs automatic fit and clearance checks, and exports DXF drawings, STL files and a Fusion archive.
+# LongRangeText 📡
 
-> **Status:** the script's logic and fit checks have been run against a mocked Fusion API. It has **not yet been validated inside Fusion 360**. Run it once and report the first error or warning (see [Known limitations](#known-limitations)).
+*A DIY ESP32-based wireless text communicator using NRF24L01+ PA/LNA, a 0.96-inch OLED and a six-button T9 keypad.*
 
----
+> **Type locally. Send wirelessly. Build your own communicator.**
 
-## Contents
+![Status](https://img.shields.io/badge/status-prototype-orange)
+![Node 1](https://img.shields.io/badge/Node%201-firmware%20included-blue)
+![Node 2](https://img.shields.io/badge/Node%202-planned-lightgrey)
+![Platform](https://img.shields.io/badge/platform-ESP32-black)
+![Radio](https://img.shields.io/badge/radio-NRF24L01%2B%20PA%2FLNA-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-1. [What you get](#what-you-get)
-2. [Hardware (bill of materials)](#hardware-bill-of-materials)
-3. [Verified dimensions and open items](#verified-dimensions-and-open-items)
-4. [Design summary](#design-summary)
-5. [Requirements](#requirements)
-6. [Quick start](#quick-start)
-7. [Output files](#output-files)
-8. [Customising (parameters)](#customising-parameters)
-9. [Automatic checks](#automatic-checks)
-10. [3D printing guide](#3d-printing-guide)
-11. [Assembly](#assembly)
-12. [Wiring notes](#wiring-notes)
-13. [Known limitations](#known-limitations)
-14. [Troubleshooting](#troubleshooting)
-15. [Roadmap](#roadmap)
-16. [Sources and credits](#sources-and-credits)
+> ⚠️ **Node 1 firmware is the only node implementation currently included. Node 2 firmware will be added in a future update.**
+> ⚠️ **A compatible Node 2 is required for end-to-end radio messaging.**
+> ⚠️ The current release is a **prototype**, not a certified commercial communication device.
 
 ---
 
-## What you get
+## Table of contents
 
-- **Two-piece enclosure** (front shell + rear shell) with a tongue-and-groove lip, 0.2 mm shell gap, and four M3 corner screws.
-- **Front panel:** OLED window, 3 × 2 keypad (6 printed keycaps with raised T9-style labels), engraved nameplate.
-- **Ports and openings:** ESP32 USB-C, TP4056 USB-C, KCD1-11 rocker-switch cutout, RP-SMA antenna opening (vertical slot for tolerance), buzzer grille (7 holes).
-- **Internal structure:** screw bosses, PCB standoffs and rails, guide ribs, battery pocket with hold-down ribs, wire channel, OLED posts (M2), keypad-board posts (M2).
-- **Detailed component models** (visual only, not printed): ESP32 DevKit, TP4056, AMS1117 module, NRF24 PA+LNA with antenna, 0.96" OLED, keypad perfboard with 6 tact switches, buzzer, 18650 holder with cell, rocker switch.
-- **Automatic checks:** pre-build fit check, Fusion interference analysis, and a written `CLEARANCE_REPORT.txt`.
-- **Exports:** 8 DXF sheets, 3 STL files, native `.f3d` archive.
-- **User parameters:** every dimension is created in Fusion's parameter table.
+1. [Project overview](#1-project-overview)
+2. [Prototype gallery](#2-prototype-gallery)
+3. [Current development status](#3-current-development-status)
+4. [Features](#4-features)
+5. [Hardware requirements](#5-hardware-requirements)
+6. [Wiring and pinout](#6-wiring-and-pinout)
+7. [Software requirements](#7-software-requirements)
+8. [Arduino library installation](#8-arduino-library-installation)
+9. [Uploading Node 1 firmware](#9-uploading-node-1-firmware)
+10. [Button controls and T9 typing](#10-button-controls-and-t9-typing)
+11. [Radio protocol overview](#11-radio-protocol-overview)
+12. [Testing procedure](#12-testing-procedure)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Safety and power-supply notes](#14-safety-and-power-supply-notes)
+15. [Known limitations](#15-known-limitations)
+16. [Roadmap](#16-roadmap)
+17. [Future Node 2 update](#17-future-node-2-update)
+18. [Future GSM and voice expansion](#18-future-gsm-and-voice-expansion)
+19. [Contributing](#19-contributing)
+20. [License](#20-license)
+21. [Acknowledgements](#21-acknowledgements)
 
-## Hardware (bill of materials)
+---
 
-Two identical units are planned. Quantities below are **per unit**.
+## 1. Project overview
 
-| Qty | Part | Notes |
-|---|---|---|
-| 1 | ESP32-WROOM-32 DevKit, 30-pin, USB Type-C | See open items: board length varies by vendor |
-| 1 | NRF24L01+ PA+LNA module with **RP-SMA** jack | Plus a 2.4 GHz RP-SMA antenna |
-| 1 | 0.96" I2C OLED (SSD1306), 4-pin | 27.3 × 27.8 mm PCB |
-| 6 | 6 × 6 × 5 mm tactile switches | Mounted on a perfboard |
-| 1 | Perfboard, cut to about 64 × 44 mm | Drill pattern is in `04_BUTTON_PATTERN.dxf` |
-| 1 | TP4056 Type-C charger/protection module | 26 or 28 mm variants exist |
-| 1 | AMS1117-3.3 V module | See the power warning below |
-| 1 | Single 18650 holder with leads | About 76 × 21.5 × 20 mm |
-| 1 | 18650 cell (flat-top) | Protected cell recommended |
-| 1 | 12 mm buzzer | 12 × 9.5 mm |
-| 1 | KCD1-11 mini rocker switch (SPST) | Panel hole about 19.2 × 12.9 mm |
-| 4 | M3 × 35 mm self-tapping screws | Rear to front, counterbored |
-| 10 | M2 × 6 mm self-tapping screws | 4 for OLED, 6 for keypad board |
+LongRangeText is a handheld wireless text communicator built around an **ESP32** and an **NRF24L01+ PA/LNA** transceiver. A 128×64 OLED and **six physical buttons** replace a full keyboard using classic multi-tap T9 input. The goal is two portable devices that exchange short text messages directly over a compatible NRF24 radio link, **without Wi-Fi or a cellular network**.
 
-> **Power warning:** an AMS1117 needs about 1.1 V of headroom. From a single Li-ion cell (3.0–4.2 V) it **cannot** hold a clean 3.3 V once the cell drops below about 4.4 V. Prefer a low-dropout or buck-boost 3.3 V regulator. Add a 10–100 µF capacitor at the NRF24 supply pins.
+### System architecture
 
-## Verified dimensions and open items
+```mermaid
+flowchart LR
+    subgraph NODE1["Node 1 (this release)"]
+        K["6-button T9 keypad<br/>GPIO 13,14,25,26,32,33"] --> E["ESP32-WROOM-32"]
+        E --> O["SSD1306 OLED<br/>I2C 0x3C"]
+        E --> B["Buzzer<br/>GPIO 27"]
+        E --> L["Status LEDs (optional)<br/>GPIO 16 / 17"]
+        E <--> R1["NRF24L01+ PA/LNA<br/>SPI + CE/CSN"]
+    end
+    R1 <-. "2.4 GHz, ch 76<br/>auto-ACK" .-> R2["Node 2 radio<br/>(future update)"]
+```
 
-Dimensions were compared against more than one source where possible. Where sources disagreed, the script uses the larger, safe envelope.
+## 2. Prototype gallery
 
-| Component | Used in model | Confidence | Note |
-|---|---|---|---|
-| NRF24L01+ PA+LNA | PCB 41 × 15.5, about 48 mm with connector, 14 mm high | Medium-high | RP-SMA, not true SMA. Jack height above the PCB is **unverified** |
-| ESP32 30-pin Type-C | 54.5 × 28 × 12.5 (upper bound) | **Low** | Vendors list about 51 to 55 mm. A photo of your board is needed |
-| 0.96" OLED | PCB 27.3 × 27.8, active 21.74 × 10.86, holes Ø2.0 | Medium | Window set to 23.0 × 12.0. Active-area offset on the PCB is **not verified** |
-| KCD1-11 switch | Panel hole 19.4 × 13.1 | Medium | The commonly quoted 15 × 10.5 is too small |
-| TP4056 Type-C | 28 × 17.5 × 4.2 (envelope) | Medium | Conflict between 26 and 28 mm variants |
-| 18650 holder | 76 × 21.5 × 20 | High | Real products range 74.5–76 × 21–21.5 × 17.7–22 |
-| AMS1117 module | 25.5 × 11.5 × 4 | Medium-high | Common breakout is about 25 × 11 mm |
-| Buzzer, tact switch | 12 × 9.5 / 6 × 6 × 5 | Low-medium | Standard parts, not re-verified |
+All images below are **real photographs of the hand-built prototype** on the author's workbench. They show the hardware at the stage of the photo. They do **not** demonstrate verified two-way messaging, range, or battery life.
 
-**Please confirm with photos or measurements:** ESP32 board, TP4056 board, AMS1117 module, and the OLED active-area offset (`oledActiveOffsetY`, measured with calipers).
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/photos/prototype-side-switch.png" alt="Prototype from the side showing the red rocker power switch and antenna">
+      <br><sub><b>Side view:</b> 3D-printed two-piece enclosure, red rocker switch, external antenna.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/photos/prototype-usb-angle.png" alt="Prototype with USB-C cable connected, OLED lit">
+      <br><sub><b>USB-C powered:</b> OLED active, six colored buttons, antenna at the top.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/photos/internal-wiring.png" alt="Open enclosure showing ESP32, NRF24 module, battery, charger board and hand wiring">
+      <br><sub><b>Internals (early wiring):</b> ESP32, NRF24 PA/LNA, 18650 cell, charger/regulator boards, button board and OLED, all hand-wired.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/photos/units-in-assembly.png" alt="Several enclosures open on the bench during assembly">
+      <br><sub><b>Assembly in progress:</b> multiple units being built for the two-node setup.</sub>
+    </td>
+  </tr>
+</table>
 
-## Design summary
+<p align="center">
+  <img src="assets/photos/workbench.png" alt="Workbench with several prototype units and antennas" width="80%">
+  <br><sub><b>Workbench:</b> prototype units under build and test.</sub>
+</p>
 
-- **External size:** 126 × 80 × 45 mm. The length grew from the 120 mm starting target because the TP4056 and the 76 mm battery holder need about 125 mm of internal length when stacked. Keycaps stand 2 mm proud of the front face.
-- **Internal size:** 121.2 × 75.2 × 39.8 mm. Wall 2.4 mm, floor 2.8 mm, front plate 2.4 mm. The rear shell is split at Z = 27 mm.
-- **Layout (top view, device portrait):**
-  - Antenna end (+Y): NRF24 on the right, rocker switch at the top wall.
-  - USB end (−Y): TP4056 on the left and ESP32 in the middle-right, with 30 mm between the two USB-C centres.
-  - Left column: 18650 holder, kept more than 25 mm from the NRF24.
-  - Right wall: buzzer with side grille.
-  - Front layer: OLED and keypad boards hang from the front plate above the floor components.
-- **Coordinate system:** origin at the enclosure centre, X across the width, Y along the length, Z up from the bottom face.
+## 3. Current development status
 
-## Requirements
-
-- Autodesk Fusion 360 (a personal or education licence works).
-- No extra Python packages. The script uses only Fusion's built-in `adsk` API.
-- A 3D printer capable of about 130 × 85 × 50 mm (FDM).
-
-## Quick start
-
-1. In Fusion, open **Utilities → Add-Ins → Scripts and Add-Ins** (Shift+S).
-2. Click **+** beside "My Scripts" and choose **Create new script** (Python). Name it `HANDHELD_COMMUNICATOR`.
-3. Open the generated `.py` file, delete its contents, and paste the full script. Save.
-4. Select the script and click **Run**. A new design opens and is built automatically.
-5. Read the message box (fit check, interference result, warnings) and open `CLEARANCE_REPORT.txt`.
-
-**Display switches at the top of the script**
-
-| Switch | Default | Effect |
-|---|---|---|
-| `SHOW_COMPONENTS` | `True` | Keeps the detailed component models visible and makes the front shell 35% transparent |
-| `SHOW_ANTENNA` | `True` | Models the antenna bent upward outside the top wall |
-
-## Output files
-
-Everything is written to `Documents/HANDHELD_COMMUNICATOR_EXPORT/`.
-
-| File | Purpose |
+| Item | Status |
 |---|---|
-| `HANDHELD_COMMUNICATOR_MODEL.f3d` | Native Fusion archive |
-| `REAR_SHELL.stl`, `FRONT_SHELL.stl`, `KEYCAPS.stl` | Print files (components are never exported) |
-| `01_FRONT_PANEL.dxf` | Front outline, OLED window, 6 key holes |
-| `02_REAR_PANEL.dxf` | Rear outline and 4 screw holes |
-| `03_OLED_PANEL.dxf` | OLED window, PCB outline, 4 mounting holes |
-| `04_BUTTON_PATTERN.dxf` | Key holes, flanges, tact positions, perfboard drill pattern |
-| `05_SWITCH_CUTOUT.dxf` | Rocker-switch cutout on the top wall |
-| `06_USB_CUTOUTS.dxf` | Both USB-C cutouts on the bottom wall |
-| `07_SMA_CUTOUT.dxf` | RP-SMA opening on the top wall |
-| `08_FULL_FLAT_PROFILE.dxf` | Front, rear and wall panels laid out flat |
-| `CLEARANCE_REPORT.txt` | Pass/fail checks, component positions, interference result, warnings |
+| OLED standalone test | ✅ Done |
+| 3D-printed enclosure built | ✅ Done (see [gallery](#2-prototype-gallery)) |
+| Node 1 firmware (this repo) | 🟡 Written, **not yet verified on the assembled hardware** |
+| Node 1 button + radio bring-up | ⏳ Pending |
+| Node 2 firmware | ⏳ Planned |
+| Two-device message delivery | ⏳ Not verified |
+| Range, battery runtime, security | ❌ Not measured, **no claims made** |
 
-In the Fusion browser, `HANDHELD_COMMUNICATOR_MODEL` contains `REAR_SHELL`, `FRONT_SHELL`, `KEYCAPS`, `COMPONENT_MODELS_VISUAL` (one sub-component per part), a hidden `REFERENCE_ENVELOPES_HIDDEN_FOR_CHECKS`, and a hidden `DXF_SKETCHES`.
+## 4. Features
 
-**DXF scale check:** open `01_FRONT_PANEL.dxf` and confirm the outline measures 80 × 126 mm. Fusion's display units are set to mm by the script.
+- Non-blocking main loop: buttons, radio RX, display, buzzer and LEDs all run cooperatively.
+- Six-button **multi-tap T9** entry (default 700 ms commit timeout), with debouncing.
+- Short press on Button 6 deletes; long press (≥ 900 ms) sends.
+- 28-character messages in a fixed **32-byte** packet with an application-level CRC-8 plus NRF24 hardware CRC-16.
+- Hardware auto-ACK with retries; the draft is **kept** if sending fails.
+- Strict validation of every received packet (version, type, node IDs, CRC, printable text).
+- Duplicate suppression for retransmitted packets.
+- Heartbeat-based peer detection (blue LED turns on only after a valid packet from Node 2).
+- The device keeps working (OLED and buttons) if the radio fails to initialize.
+- OLED auto-detects address 0x3C / 0x3D.
+- Active or passive buzzer support, plus a compile-time disable switch.
+- Optional red/blue status LEDs.
+- Serial diagnostics at 115200 baud, with debug commands (`h`, `s`, `r`).
 
-## Customising (parameters)
+## 5. Hardware requirements
 
-Two ways to change dimensions:
+**Required**
 
-1. Edit the `PARAMS` dictionary at the top of the script and run it again.
-2. In the generated design, edit values in **Modify → Change Parameters**, then run the script again while that document is active. The script reads the table and builds a fresh design.
-
-The parameters are a mirror of the script's inputs. Changing them in the table does **not** live-update existing geometry.
-
-Key parameters:
-
-| Parameter | Default (mm) | Meaning |
-|---|---|---|
-| `enclosureLength` / `Width` / `Height` | 126 / 80 / 45 | External size |
-| `wallThickness` / `baseThickness` | 2.4 / 2.8 | Walls and floor |
-| `splitHeight`, `lipHeight`, `shellGap` | 27 / 3 / 0.2 | Shell joint |
-| `cornerRadius` | 6 | Outer corner radius |
-| `usbCutoutWidth` / `Height` | 13 / 7 | USB-C plug clearance (receptacle alone is about 9 × 3.3) |
-| `switchCutoutWidth` / `Height` | 19.4 / 13.1 | Rocker panel hole |
-| `smaHoleDiameter`, `smaSlotExtra` | 8.5 / 3 | Antenna hole and vertical tolerance slot |
-| `oledWindowWidth` / `Height` | 23 / 12 | OLED window |
-| `oledActiveOffsetY` | 0 | **Measure this** on your OLED |
-| `buttonHoleDiameter`, `keycapDiameter` | 16.6 / 16 | Key holes and caps |
-| `keyPitchX` / `keyPitchY` | 25 / 23 | Key spacing |
-| `esp32Standoff`, `nrfStandoff` | 14 / 5 | Board heights above the floor |
-| `screwBossDiameter`, `m3Pilot`, `m2Pilot` | 7 / 2.6 / 1.7 | Boss and pilot sizes |
-
-## Automatic checks
-
-Before building, the script checks:
-
-- Pairwise clearance between all components (at least 2 mm).
-- RF separation: NRF24 to battery holder at least 25 mm.
-- Wall clearance for each floor component.
-- USB-C centre spacing at least 30 mm.
-- Dupont connector headroom above the NRF24 (15 mm).
-- Battery lead buffer, USB cutout position, wall thickness, key web width, keypad edge clearance.
-
-If any check fails, the script asks before building. After building, Fusion's interference analysis runs on the shells, keycaps and hidden envelope bodies.
-
-## 3D printing guide
-
-These are starting suggestions. Adjust for your printer and material.
-
-- **Material:** PETG for toughness, or PLA for prototypes.
-- **Layer height:** 0.2 mm. **Walls:** 3–4 perimeters. **Infill:** 20–30%.
-- **Front shell:** print **face-down** (front plate on the bed), supports off in most cases.
-- **Rear shell:** print floor-down.
-- **Keycaps:** print flange-down. Raised labels are 0.4 mm, so use a fine layer height.
-- **Orientation:** the STL files are exported in model orientation, so flip the front shell in your slicer.
-
-## Assembly
-
-1. Print all parts. Test-fit the TP4056, ESP32 and switch in the cutouts.
-2. Solder the wiring (see below). Leave about 120 mm of service-loop wire from the front shell electronics to the floor electronics.
-3. Place the ESP32, NRF24, TP4056 and AMS1117 on their standoffs. Snap the rocker switch into the top-wall cutout.
-4. Fit the 18650 holder in its pocket and route the leads through the wire channel.
-5. Screw the OLED to its four posts with M2 screws. Screw the keypad perfboard to its six posts with M2 screws.
-6. Drop the six keycaps into the front-plate holes from inside, then lower the front shell onto the rear shell.
-7. Insert four M3 × 35 mm screws from the bottom through the counterbored holes.
-
-## Wiring notes
-
-Typical ESP32 defaults, which you can change in firmware:
-
-- **OLED (I2C):** SDA on GPIO 21, SCL on GPIO 22, powered from 3.3 V.
-- **NRF24 (SPI):** SCK on GPIO 18, MISO on GPIO 19, MOSI on GPIO 23. CE and CSN go to two free GPIOs. Power from a stable 3.3 V with a bulk capacitor at the module.
-- **Keys:** six free GPIOs with internal pull-ups, each button to ground.
-- **Power path:** cell to TP4056 to rocker switch to regulator.
-
-Always double-check module pinouts against your own boards before powering up.
-
-## Known limitations
-
-- Not yet validated inside Fusion 360. Some steps (fillets, text, colours) are wrapped so that a failure skips the step and lists a warning instead of stopping the script.
-- Component dimensions marked low confidence need your confirmation.
-- ESP32 headers are assumed to point down. NRF24 header is assumed to point up (change `nrfStandoff` to 9 mm or more if yours points down).
-- The component models are procedural approximations, not manufacturer CAD. For exact shapes, insert STEP files from the maker, GrabCAD or SnapEDA and position them using the coordinates in `CLEARANCE_REPORT.txt`.
-- Boards are held sideways by ribs and rest on standoffs. Only the battery has a hold-down. Use a dot of hot glue or Kapton tape for the PCBs.
-- Battery access is by opening the front shell. There is no separate battery hatch.
-- Geometry is regenerated by re-running the script. It is not a live history-parametric model.
-- Raised key labels at about 1.9 mm text height are near the limit of a 0.4 mm nozzle.
-
-## Troubleshooting
-
-| Symptom | Likely cause and fix |
+| Part | Role |
 |---|---|
-| Script fails immediately | Copy the error text from the message box. Check that the whole script was pasted with no cut lines |
-| Parts are default grey | The appearance library name differs. This is cosmetic. The script lists a warning |
-| Front shell is not transparent | Hide `FRONT_SHELL` manually with its eye icon |
-| DXF has the wrong scale | Set Fusion document units to mm and run again |
-| Fit check reports FAIL | Read `CLEARANCE_REPORT.txt`, then increase `enclosureLength` or `enclosureWidth` |
-| USB plug does not fit | Increase `usbCutoutWidth` and `usbCutoutHeight` |
-| SMA connector does not line up | Adjust `smaAxisAbovePcb` or `smaSlotExtra` after measuring your module |
-| OLED window is off-centre | Measure the active-area offset and set `oledActiveOffsetY` |
+| ESP32-WROOM-32 dev board (USB Type-C) | Main MCU |
+| NRF24L01+ PA/LNA with external antenna | 2.4 GHz radio |
+| 0.96" I²C SSD1306 OLED (128×64) | Display |
+| 6 × push buttons | T9 keypad |
+| Stable 3.3 V supply capable of the PA/LNA's peak current | Radio power |
+| 100 µF electrolytic + 100 nF ceramic capacitors | Radio supply decoupling |
 
-## Roadmap
+**Optional**
 
-- Optional GSM module bay in a future revision.
-- Battery hatch on the rear shell.
-- Board hold-down clips.
-- Re-verified dimensions after photos of the ESP32, TP4056 and AMS1117.
-- Real vendor STEP models in place of procedural ones.
+| Part | Role |
+|---|---|
+| Buzzer (active, low current) | Incoming-message alert |
+| Red + blue LEDs with series resistors | Status indication |
 
-## Sources and credits
+More detail: [`docs/HARDWARE.md`](docs/HARDWARE.md)
 
-Dimensions were cross-checked from retailer and manufacturer pages including Grobotronics, Protosupplies, Canaduino (NRF24), Espressif and Grid Connect (ESP32 DevKitC), DFRobot, Easby, Lckfb and Zbotic (OLED), WE-Online and LCSC (KCD1 switch), Sigmanortec, Wald, Open-Electronics and Thingbits (TP4056), Tinytronics, Phipps, Makerlab and Circuit.rocks (AMS1117), and SparkFun, Core Electronics, Jaycar and Makers (18650 holder).
+## 6. Wiring and pinout
 
-Licence: choose one (for example MIT) before publishing.
+### OLED (I²C)
+
+| OLED | ESP32 |
+|---|---|
+| VCC | 3V3 |
+| GND | GND |
+| SDA | GPIO 21 |
+| SCL | GPIO 22 |
+
+Default address is `0x3C`. If the display stays blank, try `0x3D` (the firmware tries both).
+
+### NRF24L01+ PA/LNA
+
+| NRF24 | ESP32 |
+|---|---|
+| VCC | **Regulated 3.3 V only** (never 5 V) |
+| GND | Common GND |
+| CE | GPIO 4 |
+| CSN | GPIO 5 |
+| SCK | GPIO 18 |
+| MOSI | GPIO 23 |
+| MISO | GPIO 19 |
+| IRQ | Not connected |
+
+Place **100 µF + 100 nF** capacitors right at the radio's VCC/GND pins.
+
+### Buttons (each between GPIO and GND, `INPUT_PULLUP`, pressed = LOW)
+
+| Button | GPIO | Function |
+|---|---|---|
+| 1 | 13 | A B C D E F |
+| 2 | 14 | G H I J K L M |
+| 3 | 25 | N O P Q R S T |
+| 4 | 26 | U V W X Y Z |
+| 5 | 32 | SPACE |
+| 6 | 33 | DELETE (short) / SEND (long) |
+
+### Buzzer and LEDs
+
+| Part | GPIO | Notes |
+|---|---|---|
+| Buzzer + | 27 | Low-current active buzzer only; otherwise use a transistor driver |
+| Red LED | 16 | Series resistor, cathode to GND (optional) |
+| Blue LED | 17 | Series resistor, cathode to GND (optional) |
+
+Full diagrams: [`docs/WIRING_NODE1.md`](docs/WIRING_NODE1.md)
+
+## 7. Software requirements
+
+- Arduino IDE 2.x (or arduino-cli)
+- **ESP32 Arduino core** by Espressif (the sketch handles core 2.x and 3.x LEDC API differences)
+- Libraries: **RF24** (TMRh20), **Adafruit GFX Library**, **Adafruit SSD1306** (and its dependency Adafruit BusIO)
+
+| Component | Version tested |
+|---|---|
+| ESP32 Arduino core | _Not yet tested. Record your version here after your first build._ |
+| RF24 | _Not yet tested_ |
+| Adafruit GFX | _Not yet tested_ |
+| Adafruit SSD1306 | _Not yet tested_ |
+
+> The sketch has **not** been verified on the assembled hardware. Please update the table above after your first successful build.
+
+## 8. Arduino library installation
+
+1. Arduino IDE → **Boards Manager** → install **esp32 by Espressif Systems**.
+2. **Library Manager** → install: `RF24` (TMRh20), `Adafruit GFX Library`, `Adafruit SSD1306`, and accept `Adafruit BusIO`.
+3. **Tools → Board → ESP32 Arduino → ESP32 Dev Module**.
+
+## 9. Uploading Node 1 firmware
+
+1. Open [`firmware/node1/Node1_Communicator.ino`](firmware/node1/Node1_Communicator.ino).
+2. Review the **CONFIGURATION** block at the top (buzzer type, LEDs, channel, data rate).
+3. Select the correct COM port and click **Upload** (hold **BOOT** if your board needs it).
+4. Open Serial Monitor at **115200 baud**.
+
+## 10. Button controls and T9 typing
+
+| Action | Result |
+|---|---|
+| Tap Button 1–4 | Types the first letter of its group |
+| Tap the same button again within 700 ms | Cycles to the next letter |
+| Wait 700 ms or press another key | Commits the character |
+| Button 5 | Inserts a space |
+| Button 6 (short press) | Deletes last character |
+| Button 6 (hold ≥ 900 ms) | Sends the draft |
+
+Example: Button 3 ×2 = `O`, then Button 2 ×1 = `G`.
+
+## 11. Radio protocol overview
+
+Fixed **32-byte** packet (the NRF24 maximum payload):
+
+| Byte(s) | Field | Notes |
+|---|---|---|
+| 0 | `version \| type` | High nibble = protocol version (1), low nibble = type (1 = TEXT, 2 = HEARTBEAT) |
+| 1 | `sender \| receiver` | High nibble = sender ID, low nibble = receiver ID |
+| 2 | `seq` | Sequence number (used for duplicate suppression) |
+| 3–30 | `text[28]` | Printable ASCII, NUL-padded |
+| 31 | `crc8` | CRC-8 (poly 0x07, init 0x00) over bytes 0–30 |
+
+| Setting | Value |
+|---|---|
+| Channel | 76 (2476 MHz), subject to local regulations and interference |
+| Data rate | 250 kbps (configurable; set both nodes identically) |
+| Hardware CRC | 16-bit |
+| Auto-ACK / retries | Enabled / delay 1500 µs, 15 retries |
+| Address width | 5 bytes |
+| Node 1 address | `"NODE1"` (reading pipe 1) |
+| Node 2 address | `"NODE2"` (Node 1 writes here) |
+| PA level | `RF24_PA_MIN` for initial bench testing |
+
+> **A radio-layer ACK is not proof that the message was displayed or read.** It only means the peer's radio received a packet with a valid hardware CRC. Node 1 shows `SENT` for an ACK, never "read" or "delivered to the user".
+
+Full specification: [`docs/RADIO_PROTOCOL.md`](docs/RADIO_PROTOCOL.md)
+
+## 12. Testing procedure
+
+Run in order (details in [`docs/TESTING.md`](docs/TESTING.md)):
+
+1. ESP32 Blink sketch.
+2. OLED standalone test.
+3. Button input test (Serial Monitor shows presses).
+4. NRF24 initialization (`Radio: OK` on boot).
+5. Two-node messaging (**pending**, requires a compatible Node 2).
+6. Buzzer notification.
+7. Optional status LEDs.
+
+Expected standalone Node 1 behavior: boots to `LONG RANGE COMMS / NODE 1`, typing works, and sending shows **`NO ACK`** with the draft kept. This is correct when no Node 2 exists.
+
+## 13. Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| OLED blank | Check SDA/SCL (21/22), power, address 0x3C vs 0x3D |
+| `Radio: FAIL` | Check CE/CSN/SCK/MOSI/MISO wiring, 3.3 V supply, decoupling capacitors |
+| Radio resets or random failures | PA/LNA module brown-out. Use a dedicated 3.3 V regulator and bigger capacitors |
+| Buttons do nothing | Each button must go between its GPIO and GND |
+| Always `NO ACK` | Expected without Node 2. Otherwise check channel, data rate, addresses and antenna |
+| Upload fails | Hold BOOT, check the cable and COM port |
+| Data-rate warning in Serial | Counterfeit NRF24 clone. Set `RADIO_DATA_RATE` to `RF24_1MBPS` on both nodes |
+
+## 14. Safety and power-supply notes
+
+- **Never apply 5 V to the NRF24 VCC pin.**
+- PA/LNA modules can draw far more current than the ESP32 board's 3.3 V regulator may supply. Check your module and power it from a suitable regulated 3.3 V source with a common ground.
+- Always attach the antenna before transmitting.
+- A buzzer that draws more than a safe GPIO current must use a transistor driver.
+- Li-ion cells need a protected cell and a proper charger/protection board. Do not short or puncture them.
+- RF transmission is regulated. Check your local 2.4 GHz rules and power limits.
+
+## 15. Known limitations
+
+- Prototype firmware, **not** hardware-verified.
+- No range, battery-life or security claims. Messages are **not encrypted or authenticated**.
+- Uppercase letters only (T9 groups); no numbers or punctuation yet.
+- Only Node 1 exists. No end-to-end test has been performed.
+- Radio TX blocks briefly (tens of ms at most) while waiting for ACK or retries.
+- Early prototype wiring is hand-soldered and loose. Expect to tidy it before long-term use.
+
+## 16. Roadmap
+
+See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+- [x] OLED standalone test
+- [x] 3D-printed enclosure built
+- [ ] Integrated Node 1 firmware testing
+- [ ] Node 1 button and radio testing
+- [ ] Compatible Node 2 firmware
+- [ ] Two-way message delivery verification
+- [ ] Optional status LEDs verified
+- [ ] Battery monitoring and final wiring cleanup
+- [ ] Future GSM/SMS support
+- [ ] Future microphone, speaker and audio amplifier support
+
+## 17. Future Node 2 update
+
+Node 2 will use the same packet format and mirror the addressing (write to `"NODE1"`, read on `"NODE2"`). Until it is released, a second node can be built by anyone following [`docs/RADIO_PROTOCOL.md`](docs/RADIO_PROTOCOL.md).
+
+## 18. Future GSM and voice expansion
+
+Planned and **not implemented**: GSM/SMS gateway module, microphone, speaker and audio amplifier.
+
+## 19. Contributing
+
+Issues and pull requests are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md). Please label anything untested as untested.
+
+## 20. License
+
+MIT. See [`LICENSE`](LICENSE).
+
+## 21. Acknowledgements
+
+- [RF24 library](https://github.com/nRF24/RF24) by TMRh20 and contributors
+- [Adafruit GFX](https://github.com/adafruit/Adafruit-GFX-Library) and [Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306)
+- [Espressif Arduino-ESP32](https://github.com/espressif/arduino-esp32)
